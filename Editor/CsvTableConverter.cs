@@ -1,13 +1,14 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using PFound.Compression;
 
 namespace PFound.LocalizationService.EditorTools
 {
     /// <summary>
     /// Editor entry point that converts a localization CSV into the four on-disk table files: the
     /// definitions and content texts each written both plain (<c>.txt</c>) and LZMA-compressed
-    /// (<c>.lzma</c>, via the shared PFound.Lzma codec). Enum keys are auto-included by scanning the
+    /// (<c>.lzma</c>, via the shared PFound.Compression codec). Enum keys are auto-included by scanning the
     /// loaded assemblies for <c>[LocalizableEnum]</c> types. The routing/parse work is done by the
     /// engine-free <see cref="LocalizationTableBuilder"/>.
     /// </summary>
@@ -33,7 +34,7 @@ namespace PFound.LocalizationService.EditorTools
         {
             byte[] utf8 = Encoding.UTF8.GetBytes(text);
             File.WriteAllBytes(Path.Combine(dir, prefix + LocalizationConstants.PlainExtension), utf8);
-            File.WriteAllBytes(Path.Combine(dir, prefix + LocalizationConstants.CompressedExtension), PFound.Lzma.Lzma.Compress(utf8));
+            File.WriteAllBytes(Path.Combine(dir, prefix + LocalizationConstants.CompressedExtension), Lzma.Compress(utf8));
         }
     }
 }
