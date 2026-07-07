@@ -3,7 +3,7 @@
     "rootNamespace": "PFound.LocalizationService.Unity",
     "references": [
         "PFound.LocalizationService",
-        "PFound.ContentDelivery.Core"
+        "PFound.Lzma"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

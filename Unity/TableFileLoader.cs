@@ -1,13 +1,12 @@
 using System.IO;
 using System.Text;
 using UnityEngine;
-using PFound.ContentDelivery.Core.Compression;
 
 namespace PFound.LocalizationService.Unity
 {
     /// <summary>
     /// Loads localization table text from the engine's file locations. Plain <c>.txt</c> tables are read
-    /// directly; compressed <c>.lzma</c> tables are inflated with the shared ContentDelivery LZMA codec
+    /// directly; compressed <c>.lzma</c> tables are inflated with the shared PFound.Lzma codec
     /// (never a re-vendored 7-zip). Resolves the <c>Localizables</c> folder under either
     /// <see cref="Application.streamingAssetsPath"/> or <see cref="Application.persistentDataPath"/>.
     /// </summary>
@@ -24,7 +23,7 @@ namespace PFound.LocalizationService.Unity
         {
             byte[] bytes = File.ReadAllBytes(path);
             if (path.EndsWith(LocalizationConstants.CompressedExtension, System.StringComparison.OrdinalIgnoreCase))
-                bytes = Lzma.Decompress(bytes);
+                bytes = PFound.Lzma.Lzma.Decompress(bytes);
             return Encoding.UTF8.GetString(bytes);
         }
 
