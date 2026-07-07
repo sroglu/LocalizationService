@@ -3,7 +3,8 @@
     "rootNamespace": "PFound.LocalizationService.EditorTools",
     "references": [
         "PFound.LocalizationService",
-        "PFound.Compression"
+        "PFound.Compression",
+        "PFound.Utilities.EditorHelpers"
     ],
     "includePlatforms": [
         "Editor"

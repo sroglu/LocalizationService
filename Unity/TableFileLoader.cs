@@ -11,7 +11,7 @@ namespace PFound.LocalizationService.Unity
     /// (never a re-vendored 7-zip). Resolves the <c>Localizables</c> folder under either
     /// <see cref="Application.streamingAssetsPath"/> or <see cref="Application.persistentDataPath"/>.
     /// </summary>
-    public static class TableFileLoader
+    public static partial class TableFileLoader
     {
         public static string StreamingAssetsTablesDir
             => Path.Combine(Application.streamingAssetsPath, LocalizationConstants.TablesFolderName);
