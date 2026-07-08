@@ -26,6 +26,67 @@ namespace PFound.LocalizationService.Unity
         }
 
         /// <summary>
+        /// Extracts the content-address hash carried by a remote table URL. A URL names a file the same way
+        /// the on-disk set does (<c>.../LocalizationText-&lt;hash&gt;.lzma</c>), so the last path segment is
+        /// treated as a file name and its hash segment returned.
+        /// </summary>
+        public static string GetHashFromUrl(string url) => GetFileHashFromFileName(url);
+
+        // --- hash-addressed file names / paths -------------------------------------------------------
+
+        private static string ContentFileName(string hash)
+            => LocalizationConstants.ContentFilePrefix + LocalizationConstants.FileNameDelimiter + hash + LocalizationConstants.PlainExtension;
+
+        private static string DefinitionsFileName(string hash)
+            => LocalizationConstants.DefinitionsFilePrefix + LocalizationConstants.FileNameDelimiter + hash + LocalizationConstants.PlainExtension;
+
+        /// <summary>Writable (persistent) path a downloaded content table with <paramref name="hash"/> lands at.</summary>
+        public static string PersistentContentFilePath(string hash) => Path.Combine(PersistentTablesDir, ContentFileName(hash));
+
+        /// <summary>Writable (persistent) path a downloaded definitions table with <paramref name="hash"/> lands at.</summary>
+        public static string PersistentDefinitionsFilePath(string hash) => Path.Combine(PersistentTablesDir, DefinitionsFileName(hash));
+
+        /// <summary>
+        /// Remote (relative) path of the content table for <paramref name="hash"/>: the tables folder plus the
+        /// hash-addressed file name, joined with URL separators. Compose against a CDN base URL to fetch.
+        /// </summary>
+        public static string RemoteContentPath(string hash) => LocalizationConstants.TablesFolderName + "/" + ContentFileName(hash);
+
+        /// <summary>Remote (relative) path of the definitions table for <paramref name="hash"/>. See <see cref="RemoteContentPath"/>.</summary>
+        public static string RemoteDefinitionsPath(string hash) => LocalizationConstants.TablesFolderName + "/" + DefinitionsFileName(hash);
+
+        // --- refresh trigger + writable-dir hygiene --------------------------------------------------
+
+        /// <summary>
+        /// The update trigger: true when the <paramref name="remote"/> hash pair is valid and differs from the
+        /// <paramref name="local"/> pair (or no valid local set is present) — i.e. a refresh is warranted.
+        /// </summary>
+        public static bool NeedsRefresh(LocalizationHashData local, LocalizationHashData remote)
+        {
+            if (!remote.IsValid) return false;
+            if (!local.IsValid) return true;
+            return !string.Equals(local.ContentHash, remote.ContentHash, StringComparison.Ordinal)
+                || !string.Equals(local.DefinitionsHash, remote.DefinitionsHash, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Empties the writable Localizables directory (creating it if absent) so a refreshed table set never
+        /// coexists with a stale one under a different hash. Call before downloading a new set.
+        /// </summary>
+        public static void ClearPersistentTablesDir()
+        {
+            string dir = PersistentTablesDir;
+            if (!Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+                return;
+            }
+            var info = new DirectoryInfo(dir);
+            foreach (var file in info.GetFiles()) file.Delete();
+            foreach (var sub in info.GetDirectories()) sub.Delete(true);
+        }
+
+        /// <summary>
         /// Resolves the content + definitions hashes for the deployed table set under the StreamingAssets
         /// Localizables folder. See <see cref="GetLocalFileHashes(string)"/>.
         /// </summary>

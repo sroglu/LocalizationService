@@ -80,6 +80,10 @@ namespace PFound.LocalizationService.Unity
             try
             {
                 var culture = CultureInfo.GetCultureInfo(code);
+                // Process-wide default for every thread spawned hereafter (background/pooled threads too),
+                // then the current thread, then the catalog's formatting culture.
+                CultureInfo.DefaultThreadCurrentCulture = culture;
+                CultureInfo.DefaultThreadCurrentUICulture = culture;
                 CultureInfo.CurrentCulture = culture;
                 CultureInfo.CurrentUICulture = culture;
                 _catalog.SetCulture(culture);

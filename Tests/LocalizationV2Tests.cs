@@ -39,6 +39,78 @@ internal static class LocalizationV2Tests
         EnumKeys(check);
         Catalog(check);
         DirectorySource(check);
+        Diagnostics(check);
+        IniValidation(check);
+    }
+
+    private static void Diagnostics(Action<bool, string> c)
+    {
+        var diag = new LocalizationDiagnostics();
+
+        // Off by default: passthrough.
+        c(diag.Apply(new LocalizationKey("greeting"), "Hello") == "Hello", "diag: passthrough when disabled");
+
+        // Show-keys mode returns the key text, not the translation, and wins over pseudo.
+        diag.ShowKeys = true;
+        diag.PseudoLocalize = true;
+        c(diag.Apply(new LocalizationKey("greeting"), "Hello") == "greeting", "diag: show-keys returns the key");
+
+        // Pseudo-localization: accents letters and pads by the expansion factor (UI-overflow stress).
+        diag.ShowKeys = false;
+        diag.ExpansionFactor = 0.4f;
+        string pseudo = diag.Apply(new LocalizationKey("greeting"), "Hello");
+        c(pseudo.Length == 7, "diag: pseudo pads to length*(1+factor)  (5 -> 7)");
+        c(pseudo != "Hello" && pseudo.IndexOf("Hello", StringComparison.Ordinal) < 0, "diag: pseudo remaps ASCII to accented look-alikes");
+        c(pseudo[pseudo.Length - 1] == '~', "diag: pseudo appends the padding glyph");
+        c(diag.Pseudoize("Hello") == pseudo, "diag: pseudo is deterministic");
+
+        // Larger factor => more padding; zero-clamped on negatives.
+        diag.ExpansionFactor = 1f;
+        c(diag.Pseudoize("Hello").Length == 10, "diag: expansion factor scales padding");
+        diag.ExpansionFactor = -5f;
+        c(diag.ExpansionFactor == 0f, "diag: negative expansion factor clamped to zero");
+
+        c(diag.Pseudoize("") == "", "diag: pseudo passes through empty text");
+
+#if PFOUND_LOCALIZATION_QA
+        // Facade integration (only compiled in QA builds).
+        var source = new InMemoryLocalizationSource().Add(new LanguageKey("en-US"),
+            new Dictionary<string, string> { ["greeting"] = "Hello" });
+        var cat = new LocalizationCatalog(source, new LanguageKey("en-US"));
+        cat.SetCulture(CultureInfo.InvariantCulture);
+        c(cat.Get("greeting") == "Hello", "diag(facade): normal lookup unaffected when QA off");
+        cat.Diagnostics.ShowKeys = true;
+        c(cat.Get("greeting") == "greeting", "diag(facade): show-keys overrides the resolved value");
+        cat.Diagnostics.ShowKeys = false;
+        cat.Diagnostics.PseudoLocalize = true;
+        c(cat.Get("greeting").Length == 7, "diag(facade): pseudo-localization applied to resolved value");
+#endif
+    }
+
+    private static void IniValidation(Action<bool, string> c)
+    {
+        c(Throws(() => { var d = new IniDocument(); d.Section("en-US")["k"] = "a\tb   "; d.Write(); }),
+            "ini-validate: whitespace-padded value throws");
+        c(Throws(() => { var d = new IniDocument(); d.Section("en-US")["k"] = @"has\\escape"; d.Write(); }),
+            "ini-validate: value containing the stored-escape sequence throws");
+        c(Throws(() => { var d = new IniDocument(); d.Section("en-US")["k"] = "a\r\nb\rc"; d.Write(); }),
+            "ini-validate: mixed CRLF/CR newlines throws");
+        c(Throws(() => { var d = new IniDocument(); d.Section("en-US")[" k "] = "v"; d.Write(); }),
+            "ini-validate: whitespace-padded key throws");
+        c(Throws(() => { var d = new IniDocument(); d.Section("bad]name")["k"] = "v"; d.Write(); }),
+            "ini-validate: malformed section name throws");
+
+        // Valid documents (including internal newlines) still serialize cleanly.
+        bool ok = true;
+        try { var d = new IniDocument(); d.Section("en-US")["multi"] = "line1\nline2"; d.Write(); }
+        catch { ok = false; }
+        c(ok, "ini-validate: internal newline value serializes without throwing");
+    }
+
+    private static bool Throws(Action action)
+    {
+        try { action(); return false; }
+        catch (InvalidOperationException) { return true; }
     }
 
     private static void DirectorySource(Action<bool, string> c)
@@ -117,7 +189,12 @@ internal static class LocalizationV2Tests
     private sealed class FixedContext : ILocalizationContext
     {
         public CultureInfo Culture => CultureInfo.InvariantCulture;
-        public string Localize(LocalizationKey key) => key.Value == LocalizationConstants.HourAbbreviationKey ? "hr" : key.Value;
+        public string Localize(LocalizationKey key)
+        {
+            if (key.Value == LocalizationConstants.HourAbbreviationKey) return "hr";
+            if (key.Value == LocalizationConstants.DayAbbreviationKey) return "d";
+            return key.Value;
+        }
     }
 
     private static void Formatters(Action<bool, string> c)
@@ -129,7 +206,7 @@ internal static class LocalizationV2Tests
         c(Format(reg, new NumberValue(1234.5), LocalizationFormat.CurrencyDecimal, ctx) == "1,234.50", "fmt: currency decimal N2");
         c(Format(reg, new NumberValue(10), LocalizationFormat.CurrencyHourly, ctx) == "+10/hr", "fmt: hourly currency + localized hour");
         c(Format(reg, new NumberValue(2000), LocalizationFormat.NumberAbbreviated, ctx) == "2K", "fmt: number abbreviated");
-        c(Format(reg, new DurationValue(new TimeSpan(1, 2, 3, 4)), LocalizationFormat.Duration, ctx) == "1 02:03:04", "fmt: duration with days");
+        c(Format(reg, new DurationValue(new TimeSpan(1, 2, 3, 4)), LocalizationFormat.Duration, ctx) == "1d 02:03:04", "fmt: duration with localized day-unit label");
         c(Format(reg, new DurationValue(new TimeSpan(0, 5, 6, 7)), LocalizationFormat.Duration, ctx) == "05:06:07", "fmt: duration sub-day");
         c(Format(reg, new CoordinatesValue(3, 7), LocalizationFormat.Coordinates, ctx) == "X:3 Y:7", "fmt: coordinates");
         c(Format(reg, new CoordinatesValue(3, 7), LocalizationFormat.Size, ctx) == "3x7", "fmt: size");
@@ -164,7 +241,7 @@ internal static class LocalizationV2Tests
         s["greeting"] = "Hello";
         s["multi"] = "line1\nline2";
         string text = doc.Write();
-        c(text.Contains("[en-US]") && text.Contains("multi=line1\\line2"), "ini: newline escaped on write");
+        c(text.Contains("[en-US]") && text.Contains(@"multi=line1\\line2"), "ini: newline escaped on write (two-backslash on-disk form)");
 
         var back = IniDocument.Parse(text);
         c(back.TryGetSection("en-US", out var s2) && s2["greeting"] == "Hello", "ini: round-trip key");

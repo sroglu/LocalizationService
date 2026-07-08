@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -61,21 +62,77 @@ namespace PFound.LocalizationService
             return doc;
         }
 
+        /// <summary>
+        /// Serializes the document to INI text and validates its integrity as it goes: section headers are
+        /// well-formed, keys and values carry no surrounding whitespace, a value never contains the reserved
+        /// stored-newline escape, and newline styles are not mixed. A defect throws
+        /// <see cref="InvalidOperationException"/> rather than emitting a corrupt table.
+        /// </summary>
         public string Write()
         {
             var sb = new StringBuilder();
             foreach (var section in _sectionOrder)
             {
+                ValidateSectionName(section);
                 sb.Append('[').Append(section).Append("]\n");
                 foreach (var pair in _sections[section])
+                {
+                    ValidateKey(pair.Key);
                     sb.Append(pair.Key).Append('=').Append(Escape(pair.Value)).Append('\n');
+                }
             }
-            return sb.ToString();
+
+            string text = sb.ToString();
+            ValidateNoBlankLines(text);
+            return text;
+        }
+
+        private static void ValidateSectionName(string name)
+        {
+            if (string.IsNullOrEmpty(name) || name != name.Trim())
+                throw new InvalidOperationException("INI section name is blank or whitespace-padded: '" + name + "'.");
+            if (name.IndexOf('[') >= 0 || name.IndexOf(']') >= 0 || name.IndexOf('\n') >= 0 || name.IndexOf('\r') >= 0)
+                throw new InvalidOperationException("INI section name has an illegal character: '" + name + "'.");
+        }
+
+        private static void ValidateKey(string key)
+        {
+            if (string.IsNullOrEmpty(key) || key != key.Trim())
+                throw new InvalidOperationException("INI key is blank or whitespace-padded: '" + key + "'.");
+            if (key.IndexOf('=') >= 0 || key.IndexOf('\n') >= 0 || key.IndexOf('\r') >= 0)
+                throw new InvalidOperationException("INI key has an illegal character: '" + key + "'.");
+        }
+
+        private static void ValidateNoBlankLines(string text)
+        {
+            // text always ends with a trailing '\n'; the final split segment is the empty tail and is skipped.
+            var lines = text.Split('\n');
+            for (int i = 0; i < lines.Length - 1; i++)
+            {
+                if (lines[i].Length == 0 || string.IsNullOrWhiteSpace(lines[i]))
+                    throw new InvalidOperationException("INI output contains a blank line.");
+            }
         }
 
         private static string Escape(string value)
-            => value == null ? string.Empty
-             : value.Replace(LocalizationConstants.RuntimeNewline, LocalizationConstants.StoredNewline);
+        {
+            if (value == null) return string.Empty;
+            if (value != value.Trim())
+                throw new InvalidOperationException("INI value is whitespace-padded: '" + value + "'.");
+            if (value.IndexOf(LocalizationConstants.StoredNewline, StringComparison.Ordinal) >= 0)
+                throw new InvalidOperationException("INI value contains the reserved stored-newline escape sequence.");
+
+            // Normalize newlines to '\n'; reject a text that mixes CRLF with a lone CR.
+            string normalized = value.Replace("\r\n", "\n");
+            if (normalized.IndexOf('\r') >= 0)
+            {
+                if (normalized.Length != value.Length)
+                    throw new InvalidOperationException("INI value mixes CRLF and CR line endings.");
+                normalized = normalized.Replace('\r', '\n');
+            }
+
+            return normalized.Replace(LocalizationConstants.RuntimeNewline, LocalizationConstants.StoredNewline);
+        }
 
         private static string Unescape(string value)
             => value == null ? string.Empty

@@ -47,6 +47,14 @@ namespace PFound.LocalizationService
         public FormatterRegistry Formatters => _formatters;
         public LocalizationDefinitions Definitions => _definitions;
 
+#if PFOUND_LOCALIZATION_QA
+        /// <summary>
+        /// Non-shipping QA overrides (show-keys / pseudo-localization). Compiled in only when
+        /// <c>PFOUND_LOCALIZATION_QA</c> is defined, so shipping builds carry no diagnostic branch.
+        /// </summary>
+        public LocalizationDiagnostics Diagnostics { get; } = new LocalizationDiagnostics();
+#endif
+
         // --- lifecycle passthrough ---
         public LanguageKey ActiveLanguage => _resolver.ActiveLanguage;
         public IReadOnlyList<LanguageKey> SupportedLanguages => _resolver.SupportedLanguages;
@@ -63,7 +71,7 @@ namespace PFound.LocalizationService
         public string Get(LocalizationKey key, params ILocalizationValue[] values)
         {
             if (TryResolveRaw(key, values, out string raw, out var binding, out _))
-                return Process(raw, binding, values);
+                return Finish(key, raw, binding, values);
             return key.Value;
         }
 
@@ -72,7 +80,7 @@ namespace PFound.LocalizationService
         {
             if (TryResolveRaw(key, values, out string raw, out var binding, out _))
             {
-                text = Process(raw, binding, values);
+                text = Finish(key, raw, binding, values);
                 return true;
             }
             text = null;
@@ -84,7 +92,7 @@ namespace PFound.LocalizationService
         {
             if (TryResolveRaw(key, values, out string raw, out var binding, out fromFallback))
             {
-                text = Process(raw, binding, values);
+                text = Finish(key, raw, binding, values);
                 return true;
             }
             text = null;
@@ -96,7 +104,7 @@ namespace PFound.LocalizationService
         public string GetEnsured(LocalizationKey key, params ILocalizationValue[] values)
         {
             if (TryResolveRaw(key, values, out string raw, out var binding, out _))
-                return Process(raw, binding, values);
+                return Finish(key, raw, binding, values);
             throw new KeyNotFoundException("Missing localization key: " + key.Value);
         }
 
@@ -107,9 +115,24 @@ namespace PFound.LocalizationService
         public string GetOrErrorText(LocalizationKey key, params ILocalizationValue[] values)
         {
             if (TryResolveRaw(key, values, out string raw, out var binding, out _))
-                return Process(raw, binding, values);
+                return Finish(key, raw, binding, values);
             LocalizationLog.Error("Missing localization key: " + key.Value);
             return "# [" + key.Value + "] #";
+        }
+
+        /// <summary>
+        /// Tag-processes a resolved raw value, then — in non-shipping builds — applies any active QA
+        /// override (show-keys / pseudo-localization). Shipping builds compile straight to <see cref="Process"/>.
+        /// </summary>
+        private string Finish(LocalizationKey key, string raw, ParameterDefinition binding, ILocalizationValue[] values)
+        {
+#if PFOUND_LOCALIZATION_QA
+            if (Diagnostics.ShowKeys) return key.Value;
+            string processed = Process(raw, binding, values);
+            return Diagnostics.PseudoLocalize ? Diagnostics.Pseudoize(processed) : processed;
+#else
+            return Process(raw, binding, values);
+#endif
         }
 
         // ---------------------------------------------------------------- resolution

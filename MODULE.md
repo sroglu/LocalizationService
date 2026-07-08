@@ -15,6 +15,10 @@ consumer owns plain objects.
   `autoReferenced: false`.
 - `PFound.LocalizationService.Unity` — engine-facing driver + file/culture/preference glue.
   References `PFound.LocalizationService`, `PFound.Compression`. `autoReferenced: false`.
+- `PFound.LocalizationService.BestHttp` — remote/CDN table acquisition over BestHTTP (rootNamespace
+  `PFound.LocalizationService.Unity`). References `PFound.LocalizationService`,
+  `PFound.LocalizationService.Unity`, `BestHTTP`. Gated by the `PFOUND_BESTHTTP` define constraint,
+  `autoReferenced: false` — the module compiles without the library present.
 - `PFound.LocalizationService.Editor` — CSV / Google-Sheets / enum authoring tools (rootNamespace
   `PFound.LocalizationService.EditorTools`). References the runtime, `PFound.Compression`,
   `PFound.Utilities.EditorHelpers`.
@@ -25,7 +29,11 @@ consumer owns plain objects.
 - `PFound.Compression` — the Unity layer inflates `.lzma` tables via the shared codec.
 - `PFound.Utilities.EditorHelpers` — editor tooling only (`ImportableAsset`/`ImportableAssetEditor`
   for the Google-Sheets config).
-- No scripting defines. The core has no engine or third-party dependency.
+- `BestHTTP` — third-party HTTP transport, used **only** by the `PFound.LocalizationService.BestHttp`
+  assembly for remote/CDN table acquisition; gated behind the `PFOUND_BESTHTTP` define constraint.
+- Scripting defines: `PFOUND_BESTHTTP` (compiles the BestHTTP remote-acquisition assembly),
+  `PFOUND_LOCALIZATION_QA` (compiles the non-shipping QA diagnostics hook on the catalog). See
+  `## Conditional Compilation`. The engine-free core itself has no engine or third-party dependency.
 
 ## Key Types
 
@@ -39,19 +47,37 @@ consumer owns plain objects.
   substitution, and the `FormatterRegistry` on top of the spine. Implements `ILocalizationContext`.
 - `LanguageKey` (case-insensitive language code, e.g. `"en"`), `LocalizationKey` (implicit from
   `string`).
+- `LocalizationKeyReference` / `LanguageKeyReference` — `[Serializable]` authoring counterparts of the
+  readonly-struct runtime keys (serialized field `Key`); convert to the runtime key via `ToKey()` or
+  the implicit operator. Used by inspector/ScriptableObject content that authors keys.
 - `LocalizationDefinitions`, `ParameterDefinition` / `ParameterSpec`, `LanguageInfo`,
   `LanguageRedirections`, `LanguageSelector` (static device/preference resolution).
 - `FormatterRegistry` + `IValueFormatter` (`BuiltInFormatters`, `NumberAbbreviator`),
-  `ILocalizationValue` + `LocalizationValues`, `IValueKeyResolver`.
-- INI/CSV: `IniDocument`, `CsvReader`, `LocalizationTableBuilder`. `LocalizableEnumAttribute`
-  (`[LocalizableEnum]`), `EnumKeyGenerator`. `LocalizationLog` (pluggable log sink).
+  `ILocalizationValue` + `LocalizationValues`, `IValueKeyResolver`. `BuiltInFormatters` renders whole
+  days in the `Duration` format as the count + a localized day-unit label (key
+  `LocalizationConstants.DayAbbreviationKey`).
+- `LocalizationDiagnostics` — build-gated QA layer (show-keys + pseudo-localization), engine-free and
+  deterministic. Surfaced on the catalog only under `PFOUND_LOCALIZATION_QA`.
+- INI/CSV: `IniDocument` (validates on `Write()` — see below), `CsvReader`, `LocalizationTableBuilder`.
+  `LocalizableEnumAttribute` (`[LocalizableEnum]`), `EnumKeyGenerator`. `LocalizationLog`
+  (pluggable log sink).
 
 **Unity (`PFound.LocalizationService.Unity`)**
 
-- `UnityLocalizationController` — the engine-facing driver.
-- `TableFileLoader` — reads tables from StreamingAssets / persistentDataPath, `.lzma`-aware.
+- `UnityLocalizationController` — the engine-facing driver. `SwitchLanguage` sets **process-wide**
+  culture (`CultureInfo.DefaultThreadCurrentCulture`/`UICulture`) plus the current thread and the
+  catalog's formatting culture.
+- `TableFileLoader` — reads tables from StreamingAssets / persistentDataPath, `.lzma`-aware. The
+  `.Hashes` partial adds content-address hash resolution + remote path/hash builders + the
+  local-vs-remote refresh trigger.
 - `DeviceCultureProvider`, `ILanguagePreferenceStore` (default `PlayerPrefsLanguageStore`),
-  `LocalizationHashData`.
+  `LocalizationHashData` (readonly `ContentHash`/`DefinitionsHash` pair, `IsValid`, `Invalid`).
+
+**BestHTTP (`PFound.LocalizationService.BestHttp`, `PFOUND_BESTHTTP`-gated)**
+
+- `RemoteTableAcquisition` — downloads the hash-addressed content + definitions tables from a CDN base
+  URL into the writable persistent Localizables folder (its own BestHTTP transport), skipping the
+  transfer when the local hashes already match the remote manifest.
 
 **Editor (`PFound.LocalizationService.EditorTools`)** — `CsvTableConverter`,
 `LocalizableEnumScanner`, `GoogleSheetsConfig` + `GoogleSheetsConfigEditor`.
@@ -86,6 +112,34 @@ consumer owns plain objects.
 `ReadTable(path)`, `(LocalizationDefinitions definitions, InMemoryLocalizationSource content)
 LoadFrom(string directory)`.
 
+**Hash / remote paths (`TableFileLoader.Hashes`, static)**
+
+- `string GetFileHashFromFileName(string fileName)`, `string GetHashFromUrl(string url)`.
+- `string PersistentContentFilePath(string hash)`, `string PersistentDefinitionsFilePath(string hash)`.
+- `string RemoteContentPath(string hash)`, `string RemoteDefinitionsPath(string hash)`.
+- `bool NeedsRefresh(LocalizationHashData local, LocalizationHashData remote)` — the update trigger.
+- `void ClearPersistentTablesDir()`, `LocalizationHashData GetLocalFileHashes()` /
+  `GetLocalFileHashes(string directory)`.
+
+**Remote acquisition (`RemoteTableAcquisition`, `PFOUND_BESTHTTP`)**
+
+- `new RemoteTableAcquisition(string baseUrl)` — CDN base URL the hash-addressed paths compose against.
+- `Task<bool> RefreshAsync(LocalizationHashData remote, CancellationToken cancellationToken = default)`
+  — false when the local set is already current; true after downloading a fresh set.
+
+**QA diagnostics (`LocalizationDiagnostics`, surfaced under `PFOUND_LOCALIZATION_QA`)**
+
+- `bool ShowKeys`, `bool PseudoLocalize`, `float ExpansionFactor` (clamped non-negative).
+- `string Apply(LocalizationKey key, string localized)`, `string Pseudoize(string text)`.
+- On the catalog: `LocalizationDiagnostics Diagnostics { get; }` (compiled in only under the define).
+
+**Formatter registry (`FormatterRegistry`)** — `void Register(IValueFormatter)`,
+`bool Unregister(IValueFormatter)` (false if not registered), `void Clear()`.
+
+**Authoring keys** — `LocalizationKeyReference` / `LanguageKeyReference`: `Key` field, `bool IsValid`,
+`LocalizationKey ToKey()` / `LanguageKey ToKey()`, implicit conversions to/from `string` and the
+runtime key.
+
 ## Setup / wiring
 
 Plain library — no scene object, no singleton. Build the objects once at boot, keep the
@@ -118,6 +172,30 @@ Rules:
 - Main-thread only.
 - To swap persistence, pass your own `ILanguagePreferenceStore` to the controller.
 
+**Remote / CDN table source (optional).** Define `PFOUND_BESTHTTP` to compile the
+`PFound.LocalizationService.BestHttp` assembly, then before `LoadFrom(PersistentTablesDir)` refresh the
+writable set against a manifest:
+
+```csharp
+var acquisition = new RemoteTableAcquisition(cdnBaseUrl);
+await acquisition.RefreshAsync(remoteHashes);   // no-op when local hashes already match
+var (definitions, content) = TableFileLoader.LoadFrom(TableFileLoader.PersistentTablesDir);
+```
+
+`RefreshAsync` clears the writable dir and pulls the hash-addressed files only when
+`TableFileLoader.NeedsRefresh` sees a hash mismatch (`remoteHashes` are typically built from a manifest
+via `TableFileLoader.GetHashFromUrl`). The transport lives in its own asmdef so the module compiles
+without BestHTTP present.
+
+**QA modes (non-shipping).** Define `PFOUND_LOCALIZATION_QA` to expose `catalog.Diagnostics`. Toggle
+`Diagnostics.ShowKeys` (lookups return the raw key — spot missing/mis-wired keys) or
+`Diagnostics.PseudoLocalize` (accented look-alikes + length expansion — spot font-coverage and layout
+overflow). The gate compiles out entirely in shipping builds, so output is never altered.
+
+**INI write-time validation.** `IniDocument.Write()` validates as it serializes (well-formed section
+headers, no whitespace-padded keys/values, no reserved stored-newline escape in a value, no mixed
+newline styles, no blank lines) and throws `InvalidOperationException` rather than emit a corrupt table.
+
 ## File Structure
 
 ```
@@ -134,10 +212,12 @@ LocalizationService/
     Csv/           CsvReader, LocalizationTableBuilder
     Ini/           IniDocument
     Tags/          TagScanner
-    Diagnostics/   LocalizationLog
+    Diagnostics/   LocalizationLog, LocalizationDiagnostics
   Unity/                                  # PFound.LocalizationService.Unity
     UnityLocalizationController, TableFileLoader(.Hashes), DeviceCultureProvider,
     ILanguagePreferenceStore, PlayerPrefsLanguageStore, LocalizationHashData
+  BestHttp/                               # PFound.LocalizationService.BestHttp (PFOUND_BESTHTTP)
+    RemoteTableAcquisition
   Editor/                                 # PFound.LocalizationService.Editor
     CsvTableConverter, LocalizableEnumScanner, GoogleSheets/{GoogleSheetsConfig,GoogleSheetsConfigEditor}
   Tests/                                  # LocalizationServiceTests, LocalizationV2Tests
@@ -147,6 +227,15 @@ LocalizationService/
 
 None within PFound. Consumed directly by game bootstrap/UI code that references the runtime (and
 `.Unity`) assembly.
+
+## Conditional Compilation
+
+- `PFOUND_BESTHTTP` — define constraint on the `PFound.LocalizationService.BestHttp` assembly; compiles
+  `RemoteTableAcquisition` (remote/CDN table download over BestHTTP). Absent → the assembly is skipped
+  and the module builds without the library. The rest of the module never references BestHTTP.
+- `PFOUND_LOCALIZATION_QA` — exposes `LocalizationCatalog.Diagnostics` and its show-keys /
+  pseudo-localization branches in the lookup path. Off by default; compiled out of shipping builds so
+  resolved output is unchanged. Keep it a non-shipping (dev/QA) build flag.
 
 ## Extension points
 

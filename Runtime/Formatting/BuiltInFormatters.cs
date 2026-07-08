@@ -33,7 +33,7 @@ namespace PFound.LocalizationService
                 case LocalizationFormat.DateTimeShort:
                     return Time(value, culture, output, DateStyle.ShortDateTime);
                 case LocalizationFormat.Duration:
-                    return Duration(value, output);
+                    return Duration(value, context, output);
 
                 case LocalizationFormat.NumberAbbreviated:
                     if (!value.TryGetDouble(out double n)) return false;
@@ -95,14 +95,22 @@ namespace PFound.LocalizationService
             return true;
         }
 
-        private static bool Duration(ILocalizationValue value, StringBuilder output)
+        private static bool Duration(ILocalizationValue value, ILocalizationContext context, StringBuilder output)
         {
             TimeSpan span;
             if (value.TryGetTimeSpan(out span)) { }
             else if (value.TryGetDouble(out double seconds)) span = TimeSpan.FromSeconds(seconds);
             else return false;
 
-            if (span.Days > 0) output.Append(span.Days).Append(' ');
+            // Whole days render as the count + the LOCALIZED day-unit label (like the hourly formatter),
+            // then the remaining hh:mm:ss.
+            if (span.Days > 0)
+            {
+                string dayLabel = context != null
+                    ? context.Localize(new LocalizationKey(LocalizationConstants.DayAbbreviationKey))
+                    : LocalizationConstants.DayAbbreviationKey;
+                output.Append(span.Days).Append(dayLabel).Append(' ');
+            }
             output.Append(((int)span.Hours).ToString("00")).Append(':')
                   .Append(((int)span.Minutes).ToString("00")).Append(':')
                   .Append(((int)span.Seconds).ToString("00"));

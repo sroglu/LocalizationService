@@ -19,6 +19,9 @@ namespace PFound.LocalizationService
             _custom.Add(formatter);
         }
 
+        /// <summary>Removes a previously registered formatter. Returns false if it was not registered.</summary>
+        public bool Unregister(IValueFormatter formatter) => _custom.Remove(formatter);
+
         public void Clear() => _custom.Clear();
 
         /// <summary>

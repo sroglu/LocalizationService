@@ -20,9 +20,13 @@ controller.SwitchLanguage(new LanguageKey("tr"));   // persists + reloads + sets
 Build order: `ILocalizationSource` → `LocalizationCatalog` → `UnityLocalizationController` →
 `ActivateStartupLanguage()`.
 
+Optional build flags: `PFOUND_BESTHTTP` compiles `RemoteTableAcquisition` (CDN table download); define
+`PFOUND_LOCALIZATION_QA` to expose `catalog.Diagnostics` (show-keys / pseudo-localization QA modes).
+
 ## Dependencies
 
-`PFound.Compression` (Unity layer, `.lzma` tables); `PFound.Utilities.EditorHelpers` (editor tools only).
+`PFound.Compression` (Unity layer, `.lzma` tables); `PFound.Utilities.EditorHelpers` (editor tools only);
+`BestHTTP` (`PFOUND_BESTHTTP`-gated remote-acquisition assembly only).
 
 ## Docs
 

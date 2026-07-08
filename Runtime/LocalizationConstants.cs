@@ -24,7 +24,9 @@ namespace PFound.LocalizationService
         public const char DynamicKeyMarker = '{';
 
         // --- INI line-break escape (stored form vs runtime form) ---
-        public const string StoredNewline = "\\";   // the two chars backslash-backslash on disk
+        // On disk a runtime '\n' is stored as the two literal characters backslash-backslash, matching
+        // the table files authored by the pipeline. (@"\\" is two backslash chars, not one.)
+        public const string StoredNewline = @"\\";
         public const string RuntimeNewline = "\n";
 
         // --- INI section headers ---
@@ -51,5 +53,8 @@ namespace PFound.LocalizationService
 
         /// <summary>Localization key whose value is the abbreviation for "hour" (used by hourly currency).</summary>
         public const string HourAbbreviationKey = "unit_hour_abbreviation";
+
+        /// <summary>Localization key whose value is the abbreviation for "day" (used by the duration formatter).</summary>
+        public const string DayAbbreviationKey = "unit_day_abbreviation";
     }
 }
