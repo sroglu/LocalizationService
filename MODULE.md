@@ -24,7 +24,9 @@ consumer owns plain objects.
 - `PFound.LocalizationService.Editor` — CSV / Google-Sheets / enum authoring tools (rootNamespace
   `PFound.LocalizationService.EditorTools`). References the runtime, `PFound.Compression`,
   `PFound.Utilities.EditorHelpers`.
-- `PFound.LocalizationService.Tests` — NUnit suite (mono-testable core).
+- `PFound.LocalizationService.Tests` (engine-free core, `noEngineReferences: true`) and
+  `PFound.LocalizationService.Unity.Tests` (Unity layer: loader, controller) — NUnit EditMode tests.
+  Both are editor-only and compile only under `UNITY_INCLUDE_TESTS`, so they never reach a player build.
 
 ## Dependencies
 
@@ -66,12 +68,12 @@ consumer owns plain objects.
 
 **Unity (`PFound.LocalizationService.Unity`)**
 
-- `UnityLocalizationController` — the engine-facing driver. `SwitchLanguage` sets **process-wide**
-  culture (`CultureInfo.DefaultThreadCurrentCulture`/`UICulture`) plus the current thread and the
-  catalog's formatting culture.
-- `TableFileLoader` — reads tables from StreamingAssets / persistentDataPath, `.lzma`-aware. The
-  `.Hashes` partial adds content-address hash resolution + remote path/hash builders + the
-  local-vs-remote refresh trigger.
+- `UnityLocalizationController` — the engine-facing driver. `SwitchLanguage` sets the catalog's
+  culture only; the app and thread cultures keep their values (see **Culture** below).
+- `TableFileLoader` — reads tables from StreamingAssets / persistentDataPath, `.lzma`-aware.
+  `LoadFromStreamingAssetsAsync` reads StreamingAssets on every platform, Android included (see
+  **Loading tables on every platform** below). The `.Hashes` partial adds content-address hash
+  resolution + remote path/hash builders + the local-vs-remote refresh trigger.
 - `DeviceCultureProvider`, `ILanguagePreferenceStore` (default `PlayerPrefsLanguageStore`),
   `LocalizationHashData` (readonly `ContentHash`/`DefinitionsHash` pair, `IsValid`, `Invalid`).
 
@@ -105,14 +107,23 @@ consumer owns plain objects.
 
 - `new UnityLocalizationController(LocalizationCatalog catalog, ILanguagePreferenceStore preferences =
   null)` — default store is `PlayerPrefsLanguageStore`.
+- `new UnityLocalizationController(LocalizationCatalog catalog, ILanguagePreferenceStore preferences,
+  LanguageKey defaultLanguage)` — also sets the startup language used when neither the preference nor
+  the device culture resolves (instead of `en-US`). Throws `ArgumentException` naming the code when the
+  tables do not contain it.
 - `LanguageKey ActivateStartupLanguage()` — pick + apply the startup language once at boot.
 - `void SwitchLanguage(LanguageKey language, bool saveAsPreference = true)` — persists + reloads + sets
-  thread culture.
+  the catalog's culture.
 - `LocalizationCatalog Catalog`, `LanguageKey ActiveLanguage`.
+
+**Startup selection (`LanguageSelector`, static)** — `Resolve(preferred, deviceCulture, supported,
+redirections, out bool clearPreference)` ends with `en-US`; the overload with a `LanguageKey
+defaultLanguage` before the `out` parameter ends with that language instead.
 
 **Loading (`TableFileLoader`, static)** — `StreamingAssetsTablesDir`, `PersistentTablesDir`,
 `ReadTable(path)`, `(LocalizationDefinitions definitions, InMemoryLocalizationSource content)
-LoadFrom(string directory)`.
+LoadFrom(string directory)`, `Task<(LocalizationDefinitions definitions, InMemoryLocalizationSource
+content)> LoadFromStreamingAssetsAsync()`, `const string TableIndexFileName` (`"index.txt"`).
 
 **Hash / remote paths (`TableFileLoader.Hashes`, static)**
 
@@ -148,31 +159,73 @@ Plain library — no scene object, no singleton. Build the objects once at boot,
 `UnityLocalizationController` (or its `Catalog`) reference, and share it (e.g. register it in
 `DependencyContainer`). The consumer, not the module, decides where it lives and how long it lasts.
 
+The example runs in an async method on the main thread (for example an `async void Start()`), with
+tables that have `[en-US]` and `[tr-TR]` sections in `StreamingAssets/Localizables/`:
+
 ```csharp
-// 1. content source — folder of tables under StreamingAssets, .lzma-aware
-var (definitions, content) = TableFileLoader.LoadFrom(TableFileLoader.StreamingAssetsTablesDir);
-// (or DirectoryLocalizationSource for plain folders, or InMemoryLocalizationSource for code tables)
+// 1. content source: the tables in StreamingAssets/Localizables, read on every platform
+var (definitions, content) = await TableFileLoader.LoadFromStreamingAssetsAsync();
 
-// 2. facade over the source, with a guaranteed fallback language
-var catalog = new LocalizationCatalog(content, new LanguageKey("en"), definitions);
+// 2. facade over the source; the fallback language must be in the tables
+var fallback = new LanguageKey("en-US");
+var catalog = new LocalizationCatalog(content, fallback, definitions);
 
-// 3. Unity driver: wires logging + persistence + thread culture
-var controller = new UnityLocalizationController(catalog);   // default PlayerPrefs store
-controller.ActivateStartupLanguage();                        // pick + apply startup language ONCE at boot
+// 3. Unity driver: logging + persistence + the catalog's culture; the fallback is also the startup default
+var controller = new UnityLocalizationController(catalog, null, fallback);   // null: default PlayerPrefs store
+controller.ActivateStartupLanguage();                                        // pick + apply the startup language ONCE at boot
 
 // use it:
 string title = catalog.Get("menu.title");
-controller.SwitchLanguage(new LanguageKey("tr"));            // persists + reloads + sets culture
+controller.SwitchLanguage(new LanguageKey("tr-TR"));                         // persists + reloads + sets the catalog's culture
 ```
+
+Other sources work the same way: `TableFileLoader.LoadFrom(directory)` for a folder (synchronous),
+`DirectoryLocalizationSource` for plain folders, `InMemoryLocalizationSource` for code tables.
 
 Rules:
 
 - Call `ActivateStartupLanguage()` exactly once during startup, before any UI reads text. It picks
   the startup language from the persisted preference + device culture (via `LanguageSelector`).
 - The `fallbackLanguage` passed to `LocalizationCatalog` **must exist** in the source — it is loaded
-  eagerly and throws if absent.
+  eagerly and throws if absent. That includes a load that found no tables at all: the catalog
+  constructor throws `Fallback language not available`.
+- Pass the startup default (the controller's third argument) when the tables have no `en-US`. Without
+  it the last resort is `en-US`, and startup throws when the tables lack it; with it nothing else
+  changes. A default that is not in the tables throws `ArgumentException` naming the code.
 - Main-thread only.
 - To swap persistence, pass your own `ILanguagePreferenceStore` to the controller.
+
+**Loading tables on every platform.** `LoadFromStreamingAssetsAsync` reads `StreamingAssetsTablesDir`
+with file reads where StreamingAssets is a folder (Editor, desktop, iOS) and with `UnityWebRequest`
+where it is a URL (Android, where it lives inside the APK, and WebGL). It reads the tables into memory
+(no copy step) with the same rules as `LoadFrom`: plain `.txt` before `.lzma`, exact names before
+suffixed ones. Call it from the main thread; the requests are created and awaited there.
+
+- Exact names (`LocalizationDefinitions.txt`, `LocalizationText.lzma`, ...) need no extra file.
+- Suffixed names (`LocalizationText-<hash>.lzma`) need the optional index file `index.txt`
+  (`TableIndexFileName`) where the folder cannot be listed (Android, WebGL). Format: UTF-8 (a leading
+  byte order mark is allowed), LF or CRLF, one file name per line relative to the folder; whitespace is
+  trimmed, and blank lines, `#` comments and lines with `/` or `\` are skipped. Per table the order is:
+  exact `.txt`, listed `.txt` names in index order, exact `.lzma`, listed `.lzma` names; a listed name
+  that is missing is skipped. Where an index exists it is used on every platform, so all of them pick
+  the same files; without one, a folder is listed as `LoadFrom` does.
+- A missing table gives an empty part plus a `[Localization]` warning; a missing folder gives one
+  warning instead where it can be checked (not over a URL). Nothing throws. A catalog built over empty
+  tables throws, as noted in the rules above.
+
+**Culture.** Switching the language no longer changes the app's culture. Before, the controller set
+`CultureInfo.CurrentCulture`, `CurrentUICulture` and the defaults for new threads to the chosen language,
+so all code in the app parsed and formatted like that language (under tr-TR, `float.Parse("1.5")`
+returned 15). Now only the catalog follows the language: it formats and parses parameter values under
+`catalog.Culture`, so localized strings look exactly as before. Code outside the catalog keeps the
+culture the app started with; if it formats numbers or dates for the player, it should use
+`catalog.Culture`. The same applies to custom `IValueFormatter` and `IValueKeyResolver` code that formats
+or parses by itself: it should use `context.Culture`. The built-in values' own `AppendTo` and
+`TryGetDouble` already follow the catalog's culture while the catalog calls them. A catalog given its own
+culture (constructor or `SetCulture`) also uses it for a value's plain text and for text read as a
+number. `LocalizationService.Get(key, args)` (the spine's `string.Format` helper, not used by the
+catalog) formats with the thread culture, which no longer follows the language.
+`DeviceCultureProvider.CurrentCultureCode` keeps reporting the device culture after a switch.
 
 **Remote / CDN table source (optional).** Define `PFOUND_BESTHTTP` to compile the
 `PFound.LocalizationService.BestHttp` assembly, then before `LoadFrom(PersistentTablesDir)` refresh the
@@ -198,6 +251,9 @@ overflow). The gate compiles out entirely in shipping builds, so output is never
 headers, no whitespace-padded keys/values, no reserved stored-newline escape in a value, no mixed
 newline styles, no blank lines) and throws `InvalidOperationException` rather than emit a corrupt table.
 
+**INI byte order mark.** `IniDocument.Parse` skips a leading UTF-8 byte order mark, so a table saved
+with one (plain, or inside an `.lzma` file) keeps its first section.
+
 ## File Structure
 
 ```
@@ -206,7 +262,8 @@ LocalizationService/
     ILocalizationSource.cs, LocalizationService.cs, LocalizationKeys.cs, LocalizationConstants.cs
     Sources/       ContentTables, DirectoryLocalizationSource, InMemoryLocalizationSource
     Facade/        LocalizationCatalog, IValueKeyResolver
-    Formatting/    FormatterRegistry, BuiltInFormatters, NumberAbbreviator, IValueFormatter, ILocalizationContext
+    Formatting/    FormatterRegistry, BuiltInFormatters, NumberAbbreviator, IValueFormatter, ILocalizationContext,
+                   ValueCulture (internal)
     Parameters/    ParameterDefinition, ParameterSpec, LocalizationValues, ILocalizationValue,
                    LocalizationFormat, LocalizableEnumAttribute, EnumKeyGenerator
     Model/         LanguageInfo, LocalizationDefinitions
@@ -216,13 +273,18 @@ LocalizationService/
     Tags/          TagScanner
     Diagnostics/   LocalizationLog, LocalizationDiagnostics
   Unity/                                  # PFound.LocalizationService.Unity
-    UnityLocalizationController, TableFileLoader(.Hashes), DeviceCultureProvider,
+    UnityLocalizationController, TableFileLoader(.Hashes, .StreamingAssets), DeviceCultureProvider,
     ILanguagePreferenceStore, PlayerPrefsLanguageStore, LocalizationHashData
   BestHttp/                               # PFound.LocalizationService.BestHttp (PFOUND_BESTHTTP)
     RemoteTableAcquisition
   Editor/                                 # PFound.LocalizationService.Editor
     CsvTableConverter, LocalizableEnumScanner, GoogleSheets/{GoogleSheetsConfig,GoogleSheetsConfigEditor}
-  Tests/                                  # LocalizationServiceTests, LocalizationV2Tests
+  Tests/                                  # PFound.LocalizationService.Tests (engine-free core)
+    LocalizationServiceTests, LocalizationV2Tests, ByteOrderMarkTests, LanguageSelectorDefaultTests,
+    CatalogCultureTests
+    Unity/                                # PFound.LocalizationService.Unity.Tests
+      TableFileLoaderByteOrderMarkTests, StreamingAssetsLoadingTests, UnityLocalizationControllerTests,
+      LanguageSwitchCultureTests, SetupExampleTests
 ```
 
 ## Downstream Dependents
@@ -258,16 +320,30 @@ INI text tables the runtime source consumes.
 
 ## Limitations / Known Gaps
 
-- Main-thread, synchronous only — no async table streaming in the core (the Unity loader reads files
-  eagerly; wrap it yourself for async load).
+- Main-thread only. The core is synchronous; the Unity layer's one async loader is
+  `LoadFromStreamingAssetsAsync`, which reads whole tables into memory.
 - The fallback language is eager and mandatory; a missing fallback table is a hard failure by design.
 - No live/hot reload of tables at runtime beyond an explicit `SwitchLanguage`; edit-time regeneration
   is the editor pipeline's job.
 - `{tag}` substitution and parameter formatting run per lookup — cache results for text drawn every
   frame.
+- A table-provided prefix rule (`en-=en-GB`) cannot override the built-in `en-` → `en-US` rule: the
+  built-in prefix rules are checked first. Exact rules (`en-AU=en-GB`) are checked before any prefix rule,
+  so those do work. With tables that have no `en-US`, pass a startup default to the controller.
 
 ## Testing
 
-The core is engine-free — drive it with `InMemoryLocalizationSource` and assert
-lookup/fallback/tag/formatting behavior (`LocalizationServiceTests`, `LocalizationV2Tests`) under
-`csc`/`mono` or Unity EditMode. The Unity file/culture layer is verified in the editor.
+Two NUnit EditMode assemblies (see **Assemblies**); there is no standalone `Main()` runner. Run them in
+the Unity Test Runner (EditMode) or in batch mode with the project closed:
+
+```
+<Unity> -batchmode -projectPath <project> -runTests -testPlatform EditMode
+  -assemblyNames "PFound.LocalizationService.Tests;PFound.LocalizationService.Unity.Tests"
+  -testResults <results.xml> -logFile <editor.log>
+```
+
+Leave out `-quit`, which cuts the test run short. The core tests drive the engine-free code with
+`InMemoryLocalizationSource`; the Unity tests cover the file loader (both branches, the
+`UnityWebRequest` one forced with a `file://` URL), the controller and the culture behaviour.
+`SetupExampleTests` runs the setup example above and checks that `MODULE.md` and `README.md` show the
+same code. Three facade tests in `DiagnosticsTests` compile only with `PFOUND_LOCALIZATION_QA`.
