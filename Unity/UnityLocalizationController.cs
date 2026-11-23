@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 using UnityEngine;
 
@@ -14,6 +15,7 @@ namespace PFound.LocalizationService.Unity
         private readonly LocalizationCatalog _catalog;
         private readonly ILanguagePreferenceStore _preferences;
         private readonly LanguageRedirections _redirections;
+        private readonly LanguageKey _defaultLanguage = new LanguageKey(LocalizationConstants.DefaultLanguageCode);
 
         public LocalizationCatalog Catalog => _catalog;
         public LanguageKey ActiveLanguage => _catalog.ActiveLanguage;
@@ -26,6 +28,29 @@ namespace PFound.LocalizationService.Unity
             WireLogging();
         }
 
+        /// <summary>
+        /// Same as the two-argument constructor, plus the language to start in when neither the stored
+        /// preference nor the device culture resolves to a supported language (used instead of
+        /// <see cref="LocalizationConstants.DefaultLanguageCode"/>). Needed when the tables have no
+        /// <c>en-US</c>; the catalog's fallback language is the natural choice.
+        /// </summary>
+        /// <exception cref="ArgumentException">The tables do not contain <paramref name="defaultLanguage"/>.</exception>
+        public UnityLocalizationController(LocalizationCatalog catalog, ILanguagePreferenceStore preferences, LanguageKey defaultLanguage)
+            : this(RequireSupported(catalog, defaultLanguage), preferences)
+        {
+            _defaultLanguage = defaultLanguage;
+        }
+
+        // Runs before the main constructor, so a bad default fails before the log sinks are rewired.
+        private static LocalizationCatalog RequireSupported(LocalizationCatalog catalog, LanguageKey defaultLanguage)
+        {
+            if (catalog == null) throw new ArgumentNullException(nameof(catalog));
+            if (!catalog.IsLanguageSupported(defaultLanguage))
+                throw new ArgumentException("Default language not available: " + defaultLanguage +
+                    " (tables have: " + string.Join(", ", catalog.SupportedLanguages) + ")", nameof(defaultLanguage));
+            return catalog;
+        }
+
         private static void WireLogging()
         {
             LocalizationLog.OnWarning = Debug.LogWarning;
@@ -34,8 +59,9 @@ namespace PFound.LocalizationService.Unity
 
         /// <summary>
         /// Chooses and activates the startup language: a supported persisted preference, else the device
-        /// culture (direct or redirected), else the default. Clears a stale preference. Also aligns the
-        /// thread culture.
+        /// culture (direct or redirected), else the default language (the one given to the constructor,
+        /// otherwise <see cref="LocalizationConstants.DefaultLanguageCode"/>). Clears a stale preference.
+        /// Also aligns the thread culture.
         /// </summary>
         public LanguageKey ActivateStartupLanguage()
         {
@@ -43,7 +69,7 @@ namespace PFound.LocalizationService.Unity
             string device = DeviceCultureProvider.CurrentCultureCode;
 
             var chosen = LanguageSelector.Resolve(
-                preferred, device, _catalog.SupportedLanguages, _redirections, out bool clearPreference);
+                preferred, device, _catalog.SupportedLanguages, _redirections, _defaultLanguage, out bool clearPreference);
 
             if (clearPreference) _preferences.Clear();
 

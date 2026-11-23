@@ -28,6 +28,23 @@ namespace PFound.LocalizationService
             IReadOnlyList<LanguageKey> supported,
             LanguageRedirections redirections,
             out bool clearPreference)
+            => Resolve(preferred, deviceCulture, supported, redirections,
+                new LanguageKey(LocalizationConstants.DefaultLanguageCode), out clearPreference);
+
+        /// <summary>
+        /// Resolves the active language like the overload above, but when neither the preference nor the
+        /// device culture resolves it returns <paramref name="defaultLanguage"/> instead of
+        /// <see cref="LocalizationConstants.DefaultLanguageCode"/>. Like that constant, the default is
+        /// returned as is; the caller makes sure it is supported.
+        /// </summary>
+        /// <param name="defaultLanguage">Last-resort language, typically the catalog's fallback language.</param>
+        public static LanguageKey Resolve(
+            string preferred,
+            string deviceCulture,
+            IReadOnlyList<LanguageKey> supported,
+            LanguageRedirections redirections,
+            LanguageKey defaultLanguage,
+            out bool clearPreference)
         {
             redirections = redirections ?? LanguageRedirections.CreateDefault();
             clearPreference = false;
@@ -43,7 +60,7 @@ namespace PFound.LocalizationService
             if (TryResolveCode(deviceCulture, supported, redirections, out var fromDevice))
                 return fromDevice;
 
-            return new LanguageKey(LocalizationConstants.DefaultLanguageCode);
+            return defaultLanguage;
         }
 
         /// <summary>Resolves a single code to a supported language directly or via redirection.</summary>
