@@ -199,7 +199,11 @@ Rules:
 with file reads where StreamingAssets is a folder (Editor, desktop, iOS) and with `UnityWebRequest`
 where it is a URL (Android, where it lives inside the APK, and WebGL). It reads the tables into memory
 (no copy step) with the same rules as `LoadFrom`: plain `.txt` before `.lzma`, exact names before
-suffixed ones. Call it from the main thread; the requests are created and awaited there.
+suffixed ones. Call it from the main thread and await it; the requests are created and awaited there.
+Never block on it with `.Result`, `.Wait()` or `GetAwaiter().GetResult()`: on Android and WebGL the
+task completes in a request callback on the main thread, so blocking that thread hangs the boot. In the
+Editor, on desktop and on iOS the task is already complete when returned, so a blocking call there hides
+the problem.
 
 - Exact names (`LocalizationDefinitions.txt`, `LocalizationText.lzma`, ...) need no extra file.
 - Suffixed names (`LocalizationText-<hash>.lzma`) need the optional index file `index.txt`
@@ -209,9 +213,10 @@ suffixed ones. Call it from the main thread; the requests are created and awaite
   exact `.txt`, listed `.txt` names in index order, exact `.lzma`, listed `.lzma` names; a listed name
   that is missing is skipped. Where an index exists it is used on every platform, so all of them pick
   the same files; without one, a folder is listed as `LoadFrom` does.
-- A missing table gives an empty part plus a `[Localization]` warning; a missing folder gives one
-  warning instead where it can be checked (not over a URL). Nothing throws. A catalog built over empty
-  tables throws, as noted in the rules above.
+- A missing table gives an empty part plus a `[Localization]` warning; over a URL the warning also names
+  the last failed request with its error and response code. A missing folder gives one warning instead
+  where it can be checked (not over a URL). Nothing throws. A catalog built over empty tables throws, as
+  noted in the rules above.
 
 **Culture.** Switching the language no longer changes the app's culture. Before, the controller set
 `CultureInfo.CurrentCulture`, `CurrentUICulture` and the defaults for new threads to the chosen language,

@@ -57,6 +57,7 @@ namespace PFound.LocalizationService.Unity
 
         private static async Task<string> FindTableTextAsync(TableSource source, string prefix)
         {
+            source.LastFailure = null;
             foreach (string extension in TableExtensions)
             {
                 string exact = prefix + extension;
@@ -71,7 +72,8 @@ namespace PFound.LocalizationService.Unity
                 }
             }
 
-            Debug.LogWarning($"[Localization] No '{prefix}' table found in {source.Location}.");
+            string failure = source.LastFailure != null ? " Last request failed: " + source.LastFailure : "";
+            Debug.LogWarning($"[Localization] No '{prefix}' table found in {source.Location}.{failure}");
             return null;
         }
 
@@ -100,6 +102,9 @@ namespace PFound.LocalizationService.Unity
             protected TableSource(string location) { Location = location; }
 
             public virtual bool Exists => true;
+
+            /// <summary>The last failed request (file, error, response code); null where there are no requests.</summary>
+            public string LastFailure { get; set; }
 
             /// <summary>The file's bytes, or null when it is not there.</summary>
             public abstract Task<byte[]> TryReadAsync(string fileName);
@@ -163,7 +168,15 @@ namespace PFound.LocalizationService.Unity
                 {
                     try
                     {
-                        completion.TrySetResult(request.result == UnityWebRequest.Result.Success ? request.downloadHandler.data : null);
+                        if (request.result == UnityWebRequest.Result.Success)
+                        {
+                            completion.TrySetResult(request.downloadHandler.data);
+                        }
+                        else
+                        {
+                            LastFailure = DescribeFailure(fileName, request);
+                            completion.TrySetResult(null);
+                        }
                     }
                     catch (Exception e)
                     {
@@ -179,6 +192,11 @@ namespace PFound.LocalizationService.Unity
 
             // A URL cannot be listed: suffixed names need the index file.
             protected override IEnumerable<string> ListFolder(string prefix, string extension) => Array.Empty<string>();
+
+            // "<file>: <error> (response code <n>)"; the code only when the request got a response.
+            private static string DescribeFailure(string fileName, UnityWebRequest request)
+                => fileName + ": " + (request.error ?? request.result.ToString())
+                 + (request.responseCode > 0 ? " (response code " + request.responseCode + ")" : "");
         }
     }
 }

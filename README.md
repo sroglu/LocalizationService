@@ -8,7 +8,9 @@ MonoBehaviour host — you own plain objects.
 ## Quick reference
 
 In an async method on the main thread, with `[en-US]` and `[tr-TR]` tables in
-`StreamingAssets/Localizables/` (this loads on every platform, Android included):
+`StreamingAssets/Localizables/` (this loads on every platform, Android included). Await the load and
+never block on it with `.Result`, `.Wait()` or `GetAwaiter().GetResult()`: on Android and WebGL it
+completes on the main thread, so blocking that thread hangs.
 
 ```csharp
 // 1. content source: the tables in StreamingAssets/Localizables, read on every platform

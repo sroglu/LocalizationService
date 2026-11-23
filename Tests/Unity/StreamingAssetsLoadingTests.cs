@@ -129,10 +129,16 @@ namespace PFound.LocalizationService.Unity.Tests
 
         private IEnumerator MissingTablesGiveAnEmptyResultAndWarnings(Branch branch)
         {
-            LogAssert.Expect(LogType.Warning, new Regex("No '" + Definitions + "' table found"));
-            LogAssert.Expect(LogType.Warning, new Regex("No '" + Content + "' table found"));
+            LogAssert.Expect(LogType.Warning, MissingTableWarning(Definitions, branch));
+            LogAssert.Expect(LogType.Warning, MissingTableWarning(Content, branch));
             return Load(Location(branch), AssertEmpty);
         }
+
+        // Over a URL the warning names the last failed request (the exact .lzma name) and its error text;
+        // the folder branch makes no requests, so its warning ends at the location.
+        private static Regex MissingTableWarning(string prefix, Branch branch) => branch == Branch.WebRequest
+            ? new Regex("^\\[Localization\\] No '" + prefix + "' table found in .+\\. Last request failed: " + prefix + "\\.lzma: .+$")
+            : new Regex("^\\[Localization\\] No '" + prefix + "' table found in (?!.*Last request failed).+\\.$");
 
         [UnityTest]
         public IEnumerator MissingFolderGivesAnEmptyResultAndAWarning_File()
