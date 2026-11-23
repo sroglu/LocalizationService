@@ -20,10 +20,12 @@ namespace PFound.LocalizationService.Unity
             => Path.Combine(Application.persistentDataPath, LocalizationConstants.TablesFolderName);
 
         /// <summary>Reads a table file, decompressing if it carries the compressed extension.</summary>
-        public static string ReadTable(string path)
+        public static string ReadTable(string path) => DecodeTable(path, File.ReadAllBytes(path));
+
+        // Inflates the bytes when the name carries the compressed extension, then decodes UTF-8.
+        private static string DecodeTable(string name, byte[] bytes)
         {
-            byte[] bytes = File.ReadAllBytes(path);
-            if (path.EndsWith(LocalizationConstants.CompressedExtension, System.StringComparison.OrdinalIgnoreCase))
+            if (name.EndsWith(LocalizationConstants.CompressedExtension, System.StringComparison.OrdinalIgnoreCase))
                 bytes = CompressionCodecs.Default.Decompress(bytes);
             return Encoding.UTF8.GetString(bytes);
         }
@@ -36,7 +38,12 @@ namespace PFound.LocalizationService.Unity
         {
             string defsText = ReadPrefixed(directory, LocalizationConstants.DefinitionsFilePrefix);
             string contentText = ReadPrefixed(directory, LocalizationConstants.ContentFilePrefix);
+            return BuildTables(defsText, contentText);
+        }
 
+        // A missing table (null text) yields an empty part, as it always has.
+        private static (LocalizationDefinitions definitions, InMemoryLocalizationSource content) BuildTables(string defsText, string contentText)
+        {
             var definitions = defsText != null
                 ? LocalizationDefinitions.FromIni(IniDocument.Parse(defsText))
                 : new LocalizationDefinitions();
