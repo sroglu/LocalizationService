@@ -8,7 +8,10 @@ namespace PFound.LocalizationService.Unity
     /// Engine-facing driver around a <see cref="LocalizationCatalog"/>. It wires the core logging seam to
     /// the Unity console, decides the startup language from the persisted preference and the device
     /// culture (engine-free logic in <see cref="LanguageSelector"/>), and, on switch, persists the choice
-    /// and sets the thread's current/UI culture so .NET formatting matches the chosen language.
+    /// and sets the catalog's culture to the chosen language, so the catalog formats numbers and dates for
+    /// that language. The thread and app culture (<see cref="CultureInfo.CurrentCulture"/> and the
+    /// defaults for new threads) are left unchanged: code outside the catalog keeps parsing and formatting
+    /// under the culture it had.
     /// </summary>
     public sealed class UnityLocalizationController
     {
@@ -61,7 +64,7 @@ namespace PFound.LocalizationService.Unity
         /// Chooses and activates the startup language: a supported persisted preference, else the device
         /// culture (direct or redirected), else the default language (the one given to the constructor,
         /// otherwise <see cref="LocalizationConstants.DefaultLanguageCode"/>). Clears a stale preference.
-        /// Also aligns the thread culture.
+        /// Also sets the catalog's culture.
         /// </summary>
         public LanguageKey ActivateStartupLanguage()
         {
@@ -79,7 +82,7 @@ namespace PFound.LocalizationService.Unity
 
         /// <summary>
         /// Switches to <paramref name="language"/> (validating support), optionally persisting it as the
-        /// preference, loading its content, and setting the current/UI culture.
+        /// preference, loading its content, and setting the catalog's culture.
         /// </summary>
         public void SwitchLanguage(LanguageKey language, bool saveAsPreference = true)
         {
@@ -98,25 +101,19 @@ namespace PFound.LocalizationService.Unity
         {
             _catalog.SwitchLanguage(language);
             if (saveAsPreference) _preferences.Set(language.Code);
-            SetThreadCulture(language.Code);
+            SetCatalogCulture(language.Code);
         }
 
-        private void SetThreadCulture(string code)
+        // Only the catalog follows the language; the thread and process cultures stay as they are.
+        private void SetCatalogCulture(string code)
         {
             try
             {
-                var culture = CultureInfo.GetCultureInfo(code);
-                // Process-wide default for every thread spawned hereafter (background/pooled threads too),
-                // then the current thread, then the catalog's formatting culture.
-                CultureInfo.DefaultThreadCurrentCulture = culture;
-                CultureInfo.DefaultThreadCurrentUICulture = culture;
-                CultureInfo.CurrentCulture = culture;
-                CultureInfo.CurrentUICulture = culture;
-                _catalog.SetCulture(culture);
+                _catalog.SetCulture(CultureInfo.GetCultureInfo(code));
             }
             catch (CultureNotFoundException)
             {
-                // Non-standard code (still a valid localization key): keep the existing thread culture.
+                // Non-standard code (still a valid localization key): keep the catalog's current culture.
             }
         }
     }

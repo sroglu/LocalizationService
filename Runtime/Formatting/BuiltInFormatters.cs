@@ -15,7 +15,7 @@ namespace PFound.LocalizationService
 
         public static bool TryFormat(ILocalizationValue value, LocalizationFormat format, ILocalizationContext context, StringBuilder output)
         {
-            var culture = context != null ? context.Culture : CultureInfo.CurrentCulture;
+            var culture = context != null ? context.Culture : ValueCulture.Current;
 
             switch (format)
             {
@@ -33,7 +33,7 @@ namespace PFound.LocalizationService
                 case LocalizationFormat.DateTimeShort:
                     return Time(value, culture, output, DateStyle.ShortDateTime);
                 case LocalizationFormat.Duration:
-                    return Duration(value, context, output);
+                    return Duration(value, context, culture, output);
 
                 case LocalizationFormat.NumberAbbreviated:
                     if (!value.TryGetDouble(out double n)) return false;
@@ -95,7 +95,7 @@ namespace PFound.LocalizationService
             return true;
         }
 
-        private static bool Duration(ILocalizationValue value, ILocalizationContext context, StringBuilder output)
+        private static bool Duration(ILocalizationValue value, ILocalizationContext context, CultureInfo culture, StringBuilder output)
         {
             TimeSpan span;
             if (value.TryGetTimeSpan(out span)) { }
@@ -111,9 +111,9 @@ namespace PFound.LocalizationService
                     : LocalizationConstants.DayAbbreviationKey;
                 output.Append(span.Days).Append(dayLabel).Append(' ');
             }
-            output.Append(((int)span.Hours).ToString("00")).Append(':')
-                  .Append(((int)span.Minutes).ToString("00")).Append(':')
-                  .Append(((int)span.Seconds).ToString("00"));
+            output.Append(((int)span.Hours).ToString("00", culture)).Append(':')
+                  .Append(((int)span.Minutes).ToString("00", culture)).Append(':')
+                  .Append(((int)span.Seconds).ToString("00", culture));
             return true;
         }
 

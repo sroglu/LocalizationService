@@ -43,6 +43,12 @@ namespace PFound.LocalizationService
 
         // --- configuration ---
         public void SetValueKeyResolver(IValueKeyResolver resolver) => _valueKeyResolver = resolver;
+
+        /// <summary>
+        /// Sets the culture parameter values are formatted and parsed under: the built-in formats, a value's
+        /// plain-text fallback, text read as a number, and dynamic-key parameters. The thread and app culture
+        /// are not used and not changed. Null means the thread's current culture at the time of the call.
+        /// </summary>
         public void SetCulture(CultureInfo culture) => _culture = culture ?? CultureInfo.CurrentCulture;
         public FormatterRegistry Formatters => _formatters;
         public LocalizationDefinitions Definitions => _definitions;
@@ -166,6 +172,7 @@ namespace PFound.LocalizationService
             }
             string result = template;
             var sb = Scratch();
+            using var cultureScope = ValueCulture.Use(_culture);
             for (int i = 0; i < count; i++)
             {
                 sb.Length = 0;
@@ -181,6 +188,7 @@ namespace PFound.LocalizationService
             if (string.IsNullOrEmpty(text) || text.IndexOf(LocalizationConstants.TagOpen) < 0)
                 return text; // no tags: nothing to substitute
 
+            using var cultureScope = ValueCulture.Use(_culture);
             var outcome = TagScanner.Process(
                 text, LocalizationConstants.TagOpen, LocalizationConstants.TagClose,
                 (tagName, output) => Substitute(tagName, binding, values, output),

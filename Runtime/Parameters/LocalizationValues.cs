@@ -13,7 +13,7 @@ namespace PFound.LocalizationService
         public bool TryGetTimeSpan(out TimeSpan value) { value = default; return false; }
         public bool TryGetCoordinates(out double x, out double z) { x = z = 0; return false; }
         public bool TryGetLocalizationKey(out LocalizationKey key) { key = default; return false; }
-        public void AppendTo(StringBuilder builder) => builder.Append(_value.ToString(CultureInfo.CurrentCulture));
+        public void AppendTo(StringBuilder builder) => builder.Append(_value.ToString(ValueCulture.Current));
     }
 
     /// <summary>Wraps a Unix-seconds timestamp (used by the time formatters).</summary>
@@ -25,7 +25,7 @@ namespace PFound.LocalizationService
         public bool TryGetTimeSpan(out TimeSpan value) { value = default; return false; }
         public bool TryGetCoordinates(out double x, out double z) { x = z = 0; return false; }
         public bool TryGetLocalizationKey(out LocalizationKey key) { key = default; return false; }
-        public void AppendTo(StringBuilder builder) => builder.Append(_unixSeconds.ToString(CultureInfo.CurrentCulture));
+        public void AppendTo(StringBuilder builder) => builder.Append(_unixSeconds.ToString(ValueCulture.Current));
     }
 
     /// <summary>Wraps a duration.</summary>
@@ -51,7 +51,8 @@ namespace PFound.LocalizationService
         public bool TryGetLocalizationKey(out LocalizationKey key) { key = default; return false; }
         public void AppendTo(StringBuilder builder)
         {
-            builder.Append(_x.ToString(CultureInfo.CurrentCulture)).Append(',').Append(_z.ToString(CultureInfo.CurrentCulture));
+            var culture = ValueCulture.Current;
+            builder.Append(_x.ToString(culture)).Append(',').Append(_z.ToString(culture));
         }
     }
 
@@ -60,7 +61,7 @@ namespace PFound.LocalizationService
     {
         private readonly string _text;
         public TextValue(string text) { _text = text ?? string.Empty; }
-        public bool TryGetDouble(out double value) => double.TryParse(_text, NumberStyles.Any, CultureInfo.CurrentCulture, out value);
+        public bool TryGetDouble(out double value) => double.TryParse(_text, NumberStyles.Any, ValueCulture.Current, out value);
         public bool TryGetTimeSpan(out TimeSpan value) { value = default; return false; }
         public bool TryGetCoordinates(out double x, out double z) { x = z = 0; return false; }
         public bool TryGetLocalizationKey(out LocalizationKey key) { key = default; return false; }
