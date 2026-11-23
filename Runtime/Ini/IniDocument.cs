@@ -17,6 +17,10 @@ namespace PFound.LocalizationService
         private readonly List<string> _sectionOrder = new List<string>();
         private readonly Dictionary<string, OrderedMap> _sections = new Dictionary<string, OrderedMap>();
 
+        // What the UTF-8 byte order mark (bytes EF BB BF) decodes to when a file's bytes are decoded
+        // directly, e.g. with Encoding.UTF8.GetString. Text before the first header is never data.
+        private const char ByteOrderMark = '\uFEFF';
+
         public IReadOnlyList<string> SectionNames => _sectionOrder;
 
         public bool HasSection(string name) => _sections.ContainsKey(name);
@@ -34,13 +38,16 @@ namespace PFound.LocalizationService
 
         public bool TryGetSection(string name, out OrderedMap map) => _sections.TryGetValue(name, out map);
 
-        /// <summary>Parses document text. Header lines are <c>[name]</c>; entries are <c>key=value</c>.</summary>
+        /// <summary>
+        /// Parses document text. Header lines are <c>[name]</c>; entries are <c>key=value</c>. A leading
+        /// byte order mark is skipped, so it cannot hide the first section header.
+        /// </summary>
         public static IniDocument Parse(string text)
         {
             var doc = new IniDocument();
             if (string.IsNullOrEmpty(text)) return doc;
 
-            var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            var lines = text.TrimStart(ByteOrderMark).Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
             OrderedMap current = null;
             foreach (var rawLine in lines)
             {

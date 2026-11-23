@@ -1,63 +1,120 @@
 using System;
 using System.Collections.Generic;
-using PFound.LocalizationService;
+using NUnit.Framework;
 
-// Standalone mono/csc runner (pure C#) — parity oracle for the localization core.
-internal static class LocalizationServiceTests
+namespace PFound.LocalizationService.Tests
 {
-    private static int s_passed, s_failed;
-    private static void Check(bool cond, string name)
+    /// <summary>
+    /// The localization spine (<see cref="LocalizationService"/>): active/fallback resolution, language
+    /// switching and the raw-key fallback. Each test builds its own service and reproduces the language
+    /// state the check needs; the assertion messages keep the original check names.
+    /// </summary>
+    [TestFixture]
+    public sealed class LocalizationServiceTests
     {
-        if (cond) s_passed++;
-        else { s_failed++; Console.WriteLine("  FAIL: " + name); }
-    }
+        private static readonly LanguageKey En = new LanguageKey("en");
+        private static readonly LanguageKey Tr = new LanguageKey("tr");
 
-    private sealed class MemorySource : ILocalizationSource
-    {
-        private readonly Dictionary<LanguageKey, IReadOnlyDictionary<string, string>> _data;
-        public MemorySource(Dictionary<LanguageKey, IReadOnlyDictionary<string, string>> data) { _data = data; }
-        public IReadOnlyList<LanguageKey> AvailableLanguages
+        private sealed class MemorySource : ILocalizationSource
         {
-            get { var l = new List<LanguageKey>(_data.Keys); return l; }
+            private readonly Dictionary<LanguageKey, IReadOnlyDictionary<string, string>> _data;
+            public MemorySource(Dictionary<LanguageKey, IReadOnlyDictionary<string, string>> data) { _data = data; }
+            public IReadOnlyList<LanguageKey> AvailableLanguages
+            {
+                get { var l = new List<LanguageKey>(_data.Keys); return l; }
+            }
+            public IReadOnlyDictionary<string, string> Load(LanguageKey language) => _data[language];
         }
-        public IReadOnlyDictionary<string, string> Load(LanguageKey language) => _data[language];
-    }
 
-    public static int Main()
-    {
-        var en = new LanguageKey("en");
-        var tr = new LanguageKey("tr");
-        var source = new MemorySource(new Dictionary<LanguageKey, IReadOnlyDictionary<string, string>>
+        private static LocalizationService CreateService()
         {
-            [en] = new Dictionary<string, string> { ["hello"] = "Hello", ["greet"] = "Hi {0}", ["only_en"] = "OnlyEN" },
-            [tr] = new Dictionary<string, string> { ["hello"] = "Merhaba", ["greet"] = "Selam {0}" }, // no "only_en"
-        });
+            var source = new MemorySource(new Dictionary<LanguageKey, IReadOnlyDictionary<string, string>>
+            {
+                [En] = new Dictionary<string, string> { ["hello"] = "Hello", ["greet"] = "Hi {0}", ["only_en"] = "OnlyEN" },
+                [Tr] = new Dictionary<string, string> { ["hello"] = "Merhaba", ["greet"] = "Selam {0}" }, // no "only_en"
+            });
+            return new LocalizationService(source, fallbackLanguage: En);
+        }
 
-        var loc = new LocalizationService(source, fallbackLanguage: en);
+        private static LocalizationService CreateServiceSwitchedToTurkish()
+        {
+            var loc = CreateService();
+            loc.SwitchLanguage(Tr);
+            return loc;
+        }
 
-        Check(loc.ActiveLanguage.Equals(en), "active language defaults to fallback");
-        Check(loc.Get("hello") == "Hello", "Get returns active-language text");
+        [Test]
+        public void ActiveLanguageDefaultsToFallback()
+        {
+            var loc = CreateService();
+            Assert.That(loc.ActiveLanguage, Is.EqualTo(En), "active language defaults to fallback");
+        }
 
-        loc.SwitchLanguage(tr);
-        Check(loc.ActiveLanguage.Equals(tr) && loc.Get("hello") == "Merhaba", "SwitchLanguage changes resolution");
-        Check(loc.Get("greet", "Ali") == "Selam Ali", "Get formats with args");
-        Check(loc.Get("only_en") == "OnlyEN", "missing key falls back to fallback language");
-        Check(loc.Get("does_not_exist") == "does_not_exist", "missing everywhere returns the raw key");
+        [Test]
+        public void GetReturnsActiveLanguageText()
+        {
+            var loc = CreateService();
+            Assert.That(loc.Get("hello"), Is.EqualTo("Hello"), "Get returns active-language text");
+        }
 
-        Check(loc.IsLanguageSupported(tr) && !loc.IsLanguageSupported(new LanguageKey("de")), "IsLanguageSupported");
-        Check(loc.SupportedLanguages.Count == 2, "SupportedLanguages lists source languages");
+        [Test]
+        public void SwitchLanguageChangesResolution()
+        {
+            var loc = CreateServiceSwitchedToTurkish();
+            Assert.That(loc.ActiveLanguage, Is.EqualTo(Tr), "SwitchLanguage changes resolution");
+            Assert.That(loc.Get("hello"), Is.EqualTo("Merhaba"), "SwitchLanguage changes resolution");
+        }
 
-        Check(loc.TryGetUnprocessed("greet", out var raw) && raw == "Selam {0}", "TryGetUnprocessed returns unformatted text");
+        [Test]
+        public void GetFormatsWithArgs()
+        {
+            var loc = CreateServiceSwitchedToTurkish();
+            Assert.That(loc.Get("greet", "Ali"), Is.EqualTo("Selam Ali"), "Get formats with args");
+        }
 
-        bool threw = false;
-        try { loc.SwitchLanguage(new LanguageKey("de")); } catch (ArgumentException) { threw = true; }
-        Check(threw, "SwitchLanguage throws for unsupported language");
+        [Test]
+        public void MissingKeyFallsBackToFallbackLanguage()
+        {
+            var loc = CreateServiceSwitchedToTurkish();
+            Assert.That(loc.Get("only_en"), Is.EqualTo("OnlyEN"), "missing key falls back to fallback language");
+        }
 
-        // Extended v2 featureset coverage (shares this harness via the Check delegate).
-        LocalizationV2Tests.Run(Check);
+        [Test]
+        public void MissingEverywhereReturnsRawKey()
+        {
+            var loc = CreateServiceSwitchedToTurkish();
+            Assert.That(loc.Get("does_not_exist"), Is.EqualTo("does_not_exist"), "missing everywhere returns the raw key");
+        }
 
-        Console.WriteLine("--------------------------------------------------");
-        Console.WriteLine($"PFound.LocalizationService: passed={s_passed} failed={s_failed}");
-        return s_failed == 0 ? 0 : 1;
+        [Test]
+        public void IsLanguageSupported()
+        {
+            var loc = CreateServiceSwitchedToTurkish();
+            Assert.That(loc.IsLanguageSupported(Tr), Is.True, "IsLanguageSupported");
+            Assert.That(loc.IsLanguageSupported(new LanguageKey("de")), Is.False, "IsLanguageSupported");
+        }
+
+        [Test]
+        public void SupportedLanguagesListsSourceLanguages()
+        {
+            var loc = CreateServiceSwitchedToTurkish();
+            Assert.That(loc.SupportedLanguages.Count, Is.EqualTo(2), "SupportedLanguages lists source languages");
+        }
+
+        [Test]
+        public void TryGetUnprocessedReturnsUnformattedText()
+        {
+            var loc = CreateServiceSwitchedToTurkish();
+            Assert.That(loc.TryGetUnprocessed("greet", out var raw), Is.True, "TryGetUnprocessed returns unformatted text");
+            Assert.That(raw, Is.EqualTo("Selam {0}"), "TryGetUnprocessed returns unformatted text");
+        }
+
+        [Test]
+        public void SwitchLanguageThrowsForUnsupportedLanguage()
+        {
+            var loc = CreateServiceSwitchedToTurkish();
+            Assert.Throws<ArgumentException>(() => loc.SwitchLanguage(new LanguageKey("de")),
+                "SwitchLanguage throws for unsupported language");
+        }
     }
 }
